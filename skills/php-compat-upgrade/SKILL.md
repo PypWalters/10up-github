@@ -34,8 +34,12 @@ PHPCompatibilityWP is a permanent tool this workflow leaves in the codebase — 
 - **Direct `require-dev` entry, but not yet wired into `phpcs.xml`**: leave the dependency as-is; adding the rule ref happens in step 6b (make-the-updates mode) or is noted as a recommendation in the report (report-only mode).
 - **Only transitively available** — resolvable in `vendor/`/`composer.lock` only because another `require-dev` package happens to pull it in (e.g. a shared `phpcs-composer` standard), with no direct entry of its own: add an explicit `phpcompatibility/phpcompatibility-wp` entry to `composer.json` `require-dev`, pinned to whatever version is already resolved (`composer show phpcompatibility/phpcompatibility-wp`), then run `composer update phpcompatibility/phpcompatibility-wp --with-all-dependencies` so `composer.lock` records it as a direct dependency. Do this **before** wiring any permanent `phpcs.xml` rule ref to it — a `testVersion` config pointing at a sniff the project doesn't directly declare will break the moment the transitive package's own dependencies shift (e.g. a `dev-master` branch update).
 - **Absent entirely**: `composer require --dev phpcompatibility/phpcompatibility-wp --with-all-dependencies` to add it as a real, permanent dependency.
+- **Pin the Composer platform to the minimum PHP** (`composer config platform.php <min>.0`) before running any `composer update`/`require`, so the lock resolves for the lowest supported version. Without it, running on a newer local PHP can lock packages that don't install on the minimum (e.g. `doctrine/instantiator` 2.1 needs PHP ^8.4).
+- **Scope every update to the named package** (`composer update <pkg> --with-dependencies`); avoid blanket `--with-all-dependencies`, which can jump unrelated majors. After any lock change, diff it and flag major bumps. For wp-phpunit projects, keep `phpunit/phpunit` at `^9.6` — the WP test library doesn't run on PHPUnit 10+.
 - Handle `dealerdirect/phpcodesniffer-composer-installer` — it needs `"allow-plugins"` set to `true` in `composer.json` `config` (composer will prompt/fail otherwise); if the project doesn't already allow it, set that permanently as part of this change.
 - If this step changes `composer.json`/`composer.lock` (moving the package from absent/transitive to a direct dependency), that's an intentional, permanent addition — not a temporary scratch install to clean up later. Flag it plainly in the step 4 summary so the user knows the dependency tree changed, including in report-only mode.
+
+- **Confirm phpcs itself runs** on the newest PHP in the range (`vendor/bin/phpcs .`). Old standards (e.g. `10up/phpcs-composer` on `dev-master`, with an outdated WPCS) crash with PHP 8.4+ deprecations before any sniff runs; upgrade the standard (e.g. `^3.0`) so the compatibility scan can execute, and fix any style errors it then surfaces (`phpcbf`, committed separately from the version changes).
 
 ## 3. Run the scan — two separate passes
 
@@ -82,33 +86,35 @@ Present the findings from step 4 in chat, plus the always-advisory sections in s
   - Apply the Pass A phpcs-flagged fixes directly
   - Apply Pass B vendor fixes that are safe per step 3 (`composer update <pkg>` only where the fix is within the existing constraint)
   - Remove now-dead version shims/conditionals found via grep (`version_compare( PHP_VERSION, ...)`, `PHP_VERSION_ID <` guards, polyfills for things natively available at the new minimum) — simplify, don't leave dead branches behind
-  - Update `README.md`/`CHANGELOG.md` mentions of the supported PHP range
+  - Update `README.md`/`CHANGELOG.md` mentions of the supported PHP range, and add a changelog entry for the bump
+  - Search `tests/` too for polyfills of functions native at the new minimum (e.g. `function_exists( 'str_contains' )` shims in test bootstraps) and remove them with their `require`s
 - **Run the test suite** before calling this done:
   - Detect it: `composer.json`/`package.json` `scripts` (`test`, `test:php`), `phpunit.xml.dist`, `tests/`, `.wp-env.json`.
   - Run whatever's found (e.g. `npm run env:start` then `npm run test:php` for wp-env-based projects). If the runner needs Docker and it's unavailable, say so explicitly rather than skipping silently.
+  - Before finishing, dry-run `composer install` under each PHP version in the range (temp copy of `composer.json`/`composer.lock` with `platform.php` set per version) to confirm the lock installs everywhere.
+  - State which PHP version(s) the tests actually ran on; a local run on one version doesn't verify the rest of the matrix.
   - Commit the changes on the branch either way, so work isn't lost — but the commit message and your summary to the user must state test results plainly: pass, fail (with which tests/why), or "no test setup detected." Never imply "done" if tests failed or couldn't run.
 
 ## 7. Always include, report or auto-fix — advisory only, never auto-applied
 
 - Third-party dependency constraints that look too old to guarantee support for the target range, beyond what Pass B already caught (e.g. abandoned packages, packages with no recent releases) — flag for manual review.
-- Targeted PHP 8.2+ opportunities (readonly properties, enums, first-class callable syntax, etc.) where they'd meaningfully improve the code — list as suggestions only. Do not apply these, even in auto-fix mode: the ask was to raise the compatibility floor, not to refactor for newer syntax.
+- Targeted PHP `<min>`+ opportunities (readonly properties, enums, first-class callable syntax, etc.) where they'd meaningfully improve the code — list as suggestions only. Do not apply these, even in auto-fix mode: the ask was to raise the compatibility floor, not to refactor for newer syntax.
 
 ## Guardrails
 
 - Never push or open a PR — stop after the local branch + commit (or after the report) and hand back to the user.
 - Never touch `vendor/` files directly.
+- Multiple plugins may be on the same branch name; always confirm which repo you're operating in (`git -C <plugin> branch --show-current`) before editing or committing.
 - Never remove PHPCompatibilityWP once it's a dependency — it's permanent, kept in the codebase for repeat compatibility checks, not a scratch tool to uninstall after the scan.
 - Before wiring a permanent `PHPCompatibilityWP` rule ref + `testVersion` into `phpcs.xml`, confirm the package is a direct `require-dev` entry (not merely transitive) — a rule ref to an undeclared sniff will break on a future `composer update`.
 
 ## Success
-Ensure the following is true:
-`<min>` and `<max>` refer to the target range resolved in step 0 (default `8.2`-`8.5`).
-
+`<min>` and `<max>` below are the target range resolved in step 0 (default `8.2` and `8.5`, or the range given in the invocation args). Ensure the following is true:
 - Raised the minimum supported PHP version to `<min>`
 - Ensured the project supports and is tested through PHP `<max>`
 - Update composer.json, plugin/package metadata, CI workflows, compatibility tooling, static analysis, readmes/docs, and related configuration as applicable
 - Updated dependencies where necessary for PHP `<min>`–`<max>` compatibility
 - Removed or simplified compatibility code that only exists to support PHP versions below `<min>` where appropriate
 - Addressed PHP `<min>`–`<max>` deprecations, compatibility issues, or test failures identified by the skill
-- Updated relevant documentation to reflect the new supported PHP range
-- All tests pass for the given PHP range (every version from `<min>` through `<max>`)
+- Updated relevant documentation to reflect the new supported PHP range (`<min>`–`<max>`)
+- All tests pass for the given PHP range — locally for the versions actually run, and in the CI matrix once the user pushes (the skill can't claim versions it didn't run; if CI fails after pushing, treat the failing step's log as the next input)
