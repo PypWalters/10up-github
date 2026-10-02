@@ -102,11 +102,13 @@ Present the findings from step 4 in chat, plus the always-advisory sections in s
 
 ## Success
 Ensure the following is true:
-- Raised the minimum supported PHP version to 8.2
-- Ensured the project supports and is tested through PHP 8.5
+`<min>` and `<max>` refer to the target range resolved in step 0 (default `8.2`-`8.5`).
+
+- Raised the minimum supported PHP version to `<min>`
+- Ensured the project supports and is tested through PHP `<max>`
 - Update composer.json, plugin/package metadata, CI workflows, compatibility tooling, static analysis, readmes/docs, and related configuration as applicable
-- Updated dependencies where necessary for PHP 8.2–8.5 compatibility
-- Removed or simplified compatibility code that only exists to support PHP versions below 8.2 where appropriate
-- Addressed PHP 8.2–8.5 deprecations, compatibility issues, or test failures identified by the skill
+- Updated dependencies where necessary for PHP `<min>`–`<max>` compatibility
+- Removed or simplified compatibility code that only exists to support PHP versions below `<min>` where appropriate
+- Addressed PHP `<min>`–`<max>` deprecations, compatibility issues, or test failures identified by the skill
 - Updated relevant documentation to reflect the new supported PHP range
-- All tests pass for the given PHP range
+- All tests pass for the given PHP range (every version from `<min>` through `<max>`)
